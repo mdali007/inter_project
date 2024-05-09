@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Uploaded Videos</title>
+</head>
+<body>
+  <h1>Uploaded Videos</h1>
+  <ul>
+    {% for video in converted_videos %}
+      <li>
+        {% if video.endswith('.mpd') %}
+          <!-- Use Bitmovin Player for MPEG-DASH videos -->
+          <div id="player{{ loop.index }}"></div>
+          <script>
+            var player{{ loop.index }} = bitmovin.player('player{{ loop.index }}');
+            player{{ loop.index }}.setup({
+              key: '29eeb43e-6fe4-4cbf-87bf-9d9ef0a777e4',
+              playback: {
+                autoplay: false,
+                muted: false
+              },
+              source: {
+                dash: '/uploads/{{ video }}' // Path to your MPEG-DASH video
+              }
+            });
+          </script>
+        {% else %}
+          <!-- Use HTML5 video element for regular videos -->
+          <video controls>
+            <source src="/uploads/{{ video }}" type="video/mp4">
+           
+          </video>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+  <!-- Include Bitmovin Player library -->
+  <script src="https://cdn.bitmovin.com/bitmovin-player/stable/7/bitmovinplayer.js"></script>
+</body>
+</html>
