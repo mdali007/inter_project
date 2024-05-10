@@ -22,7 +22,7 @@ class Video(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     path = db.Column(db.String(255))
     task_id = db.Column(db.String(255))  # Add a column to store Celery task ID
-    db.create_all()
+    # db.create_all()
 
 @app.route('/') 
 def main(): 
@@ -30,12 +30,23 @@ def main():
 
 @celery.task(bind=True)
 def convert_video(self, temp_filepath, dash_filepath):
-    cmd = ['ffmpeg',
-           '-i', temp_filepath,
-           '-adaptation_sets', 'id=0,streams=v',
-           '-strict', '-2',
-           '-f', 'dash',
-           dash_filepath]
+    # cmd = ['ffmpeg',
+    #        '-i', temp_filepath,
+    #        '-adaptation_sets', 'id=0,streams=v',
+    #        '-strict', '-2',
+    #        '-f', 'dash',
+    #        dash_filepath]
+    cmd = ["ffmpeg",
+            "-i", temp_filepath,
+            "-map", "0:v",
+            "-map", "0:a",
+            "-adaptation_sets", "id=0,streams=v", "id=1,streams=a"
+            "-strict", "-2",
+            "-f", "dash",
+            dash_filepath]
+    
+# ffmpeg -i /Users/mdali/Downloads/python/int_project/uploads/WhatsApp\ Video\ 2024-04-20\ at\ 12.23.52\ AM.mp4 -adaptation_sets id=0 streams=v -strict -2 -f dash /Users/mdali/Downloads/python/int_project/uploads/output.mpd
+
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     output, error = process.communicate()
     if process.returncode == 0:
@@ -60,7 +71,9 @@ def upload_videos():
         
         # Convert video to MPEG-DASH format using Celery task
         dash_filename = os.path.splitext(video.filename)[0] + '.mpd'
+        print(dash_filename)
         dash_filepath = os.path.join('uploads', dash_filename)
+        print(dash_filepath)
         
         task = convert_video.delay(temp_filepath, dash_filepath)
         
