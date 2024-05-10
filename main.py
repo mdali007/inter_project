@@ -63,5 +63,6 @@ def display_videos():
     return render_template("display.html", videos=videos)
 
 if __name__ == '__main__':
-    db.create_all()
+    with app.app_context():
+        db.create_all()
     app.run(debug=True)
