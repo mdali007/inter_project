@@ -1,19 +1,47 @@
-from flask import Flask, request, render_template, redirect, url_for, send_from_directory
+from flask import Flask, request, render_template, redirect, url_for, send_from_directory, jsonify
 from flask_sqlalchemy import SQLAlchemy
 import os
+from celery import Celery
+from celery.result import AsyncResult
 import subprocess
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///videos.db'
 db = SQLAlchemy(app)
 
+# Define the base directory
+basedir = os.path.abspath(os.path.dirname(__file__))
+
+# Celery configuration
+celery = Celery(app.import_name,
+                broker='sqla+sqlite:///' + os.path.join(basedir, 'celery.db'),
+                backend='db+sqlite:///' + os.path.join(basedir, 'celery_results.db'))
+
+
 class Video(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     path = db.Column(db.String(255))
+    task_id = db.Column(db.String(255))  # Add a column to store Celery task ID
+    db.create_all()
 
 @app.route('/') 
 def main(): 
     return render_template("index.html") 
+
+@celery.task(bind=True)
+def convert_video(self, temp_filepath, dash_filepath):
+    cmd = ['ffmpeg',
+           '-i', temp_filepath,
+           '-adaptation_sets', 'id=0,streams=v',
+           '-strict', '-2',
+           '-f', 'dash',
+           dash_filepath]
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    output, error = process.communicate()
+    if process.returncode == 0:
+        return {'status': 'completed', 'output': output.decode('utf-8')}
+    else:
+        return {'status': 'failed', 'output': error.decode('utf-8')}
 
 @app.route('/upload', methods=['POST'])
 def upload_videos():
@@ -30,24 +58,14 @@ def upload_videos():
         temp_filepath = f'uploads/{video.filename}'
         video.save(temp_filepath)
         
-        # Convert video to MPEG-DASH format using ffmpeg
+        # Convert video to MPEG-DASH format using Celery task
         dash_filename = os.path.splitext(video.filename)[0] + '.mpd'
         dash_filepath = os.path.join('uploads', dash_filename)
         
-        cmd = ['ffmpeg',
-               '-i', temp_filepath,
-               '-adaptation_sets', 'id=0,streams=v',
-               '-strict', '-2',
-               '-f', 'dash',
-               dash_filepath]
+        task = convert_video.delay(temp_filepath, dash_filepath)
         
-        subprocess.Popen(cmd)
-
-        # Remove temporary video file
-        os.remove(temp_filepath)
-        
-        # Save path to database
-        video_entry = Video(path=dash_filepath)
+        # Save path and task ID to database
+        video_entry = Video(path=dash_filepath, task_id=task.id)
         db.session.add(video_entry)
         db.session.commit()
 
@@ -61,6 +79,11 @@ def serve_video(filename):
 def display_videos():
     videos = Video.query.all()
     return render_template("display.html", videos=videos)
+
+@app.route('/status/<task_id>')
+def task_status(task_id):
+    task = AsyncResult(task_id, app=celery)
+    return jsonify({'status': task.state, 'output': task.result})
 
 if __name__ == '__main__':
     with app.app_context():
